@@ -707,6 +707,56 @@ export default function App() {
   };
 
   // --- Rendering Helpers ---
+  const renderNewGameModal = () => (
+    showNewGameModal && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
+        <div className={`w-full max-w-md border ${THEME.border} ${THEME.bg} p-6 relative shadow-2xl animate-fadeIn`}>
+          <button
+            onClick={() => setShowNewGameModal(false)}
+            className="absolute top-4 right-4 text-[#666] hover:text-[#fff]"
+          >
+            <X size={20} />
+          </button>
+
+          <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-[var(--color-primary)]">
+            <Activity size={20} /> GENERATE NEW SOUP
+          </h2>
+
+          <div className="mb-6">
+            <label className={`block text-xs uppercase tracking-widest ${THEME.textDim} mb-2`}>
+              Scenario Keywords / Theme (Optional)
+            </label>
+            <input
+              type="text"
+              value={themeKeywords}
+              onChange={(e) => setThemeKeywords(e.target.value)}
+              placeholder="e.g. Cyberpunk, Ancient School, Time Loop..."
+              className={`w-full bg-black/50 border ${THEME.border} p-3 outline-none focus:border-[var(--color-primary)] transition-colors text-sm font-mono`}
+            />
+            <p className="text-[10px] text-[#666] mt-2 font-mono">
+              Leave empty for completely random generation.
+            </p>
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              onClick={() => setShowNewGameModal(false)}
+              className={`flex-1 py-3 border ${THEME.border} hover:bg-[var(--color-surface)] transition-colors text-xs font-bold`}
+            >
+              CANCEL
+            </button>
+            <button
+              onClick={confirmGenerate}
+              className={`flex-1 py-3 bg-[var(--color-primary)] text-[var(--color-inverse)] font-bold text-xs hover:opacity-90 transition-opacity flex items-center justify-center gap-2`}
+            >
+              {isGenerating ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+              GENERATE
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  );
 
   // --- Access Control ---
   if (!isAuthorized) {
@@ -879,6 +929,7 @@ export default function App() {
             </button>
           </div>
         </main>
+        {renderNewGameModal()}
       </div>
     );
   }
@@ -1188,54 +1239,8 @@ export default function App() {
       </main>
 
       {/* New Game Modal */}
-      {showNewGameModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4">
-          <div className={`w-full max-w-md border ${THEME.border} ${THEME.bg} p-6 relative shadow-2xl animate-fadeIn`}>
-            <button
-              onClick={() => setShowNewGameModal(false)}
-              className="absolute top-4 right-4 text-[#666] hover:text-[#fff]"
-            >
-              <X size={20} />
-            </button>
-
-            <h2 className="text-xl font-bold mb-4 flex items-center gap-2 text-[var(--color-primary)]">
-              <Activity size={20} /> GENERATE NEW SOUP
-            </h2>
-
-            <div className="mb-6">
-              <label className={`block text-xs uppercase tracking-widest ${THEME.textDim} mb-2`}>
-                Scenario Keywords / Theme (Optional)
-              </label>
-              <input
-                type="text"
-                value={themeKeywords}
-                onChange={(e) => setThemeKeywords(e.target.value)}
-                placeholder="e.g. Cyberpunk, Ancient School, Time Loop..."
-                className={`w-full bg-black/50 border ${THEME.border} p-3 outline-none focus:border-[var(--color-primary)] transition-colors text-sm font-mono`}
-              />
-              <p className="text-[10px] text-[#666] mt-2 font-mono">
-                Leave empty for completely random generation.
-              </p>
-            </div>
-
-            <div className="flex gap-3">
-              <button
-                onClick={() => setShowNewGameModal(false)}
-                className={`flex-1 py-3 border ${THEME.border} hover:bg-[var(--color-surface)] transition-colors text-xs font-bold`}
-              >
-                CANCEL
-              </button>
-              <button
-                onClick={confirmGenerate}
-                className={`flex-1 py-3 bg-[var(--color-primary)] text-[var(--color-inverse)] font-bold text-xs hover:opacity-90 transition-opacity flex items-center justify-center gap-2`}
-              >
-                {isGenerating ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                GENERATE
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* New Game Modal */}
+      {renderNewGameModal()}
 
       {/* Global CSS for animations */}
       <style>{`
