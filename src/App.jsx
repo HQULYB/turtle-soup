@@ -59,6 +59,8 @@ const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
 
+const ADMIN_UID = import.meta.env.VITE_ADMIN_UID;
+
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -185,6 +187,32 @@ const Typewriter = ({ text, onComplete }) => {
   }, [text, onComplete]);
 
   return <span>{displayedText}</span>;
+};
+
+// System Log Item Component
+const LogItem = ({ message }) => {
+  const parts = message.split(/(\[.*?\]|ERROR:|WARNING:|SUCCESS:|ACCESS DENIED:)/g).filter(Boolean);
+
+  return (
+    <div>
+      <span className="text-[var(--color-primary)] mr-2">&gt;</span>
+      {parts.map((part, i) => {
+        if (part.includes('ERROR') || part.includes('DENIED') || part.includes('LOCKED')) {
+          return <span key={i} className="text-[var(--color-error)] font-bold">{part}</span>;
+        }
+        if (part.includes('SUCCESS') || part.includes('SOLVED') || part.includes('PTS')) {
+          return <span key={i} className="text-[var(--color-primary)] font-bold">{part}</span>;
+        }
+        if (part.startsWith('[') && part.endsWith(']')) {
+          // Timestamp or Special Tag
+          return <span key={i} className="text-[var(--color-text-dim)]">{part}</span>;
+        }
+        // Bold Usernames (heuristic: roughly looks like a name if it's the first word, but hard to guarantee. 
+        // Instead, let's just highlight specific known keywords or let it be standard)
+        return <span key={i}>{part}</span>;
+      })}
+    </div>
+  );
 };
 
 // --- Main Application Component ---
@@ -378,6 +406,28 @@ export default function App() {
 
   const handleJoin = async () => {
     if (!username.trim()) return;
+    // Check Username Uniqueness
+    const playersRef = collection(db, 'artifacts', appId, 'public', 'data', 'players');
+    const q = query(playersRef); // Get all players to check uniqueness (client-side filter for simplicity or use where clause if indexed)
+    // Since we need to check active players, checking all is safer if we don't have good offline detection index
+
+    // Better: Query specifically for name
+    // Note: This requires complex index if we want to filter by name AND updated status. 
+    // For now, let's fetch all and filter. List shouldn't be huge.
+    const snapshot = await getDocs(q);
+    const isTaken = snapshot.docs.some(d => {
+      const p = d.data();
+      // Check if name matches AND player is considered online (e.g. within last 2 mins)
+      const lastSeenMs = p.lastSeen?.seconds ? p.lastSeen.seconds * 1000 : 0;
+      const isOnline = (Date.now() - lastSeenMs) < 120000;
+      return p.name.toLowerCase() === username.trim().toLowerCase() && isOnline && p.uid !== user.uid;
+    });
+
+    if (isTaken) {
+      setAuthError(`Identity '${username}' is currently active. Choose another codename.`);
+      return;
+    }
+
     setJoined(true);
 
     // Register player
@@ -403,6 +453,19 @@ export default function App() {
     // --- Command: /skip ---
     if (inputText.trim().toLowerCase() === '/skip') {
       setInputText('');
+
+      if (ADMIN_UID && user.uid !== ADMIN_UID) {
+        addSystemLog(`ACCESS DENIED: /skip requires ADMIN privileges.`);
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'chat_messages'), {
+          text: `> COMMAND REJECTED: UNAUTHORIZED USER [${username}]`,
+          sender: "SYSTEM",
+          senderId: "SYSTEM",
+          type: "error",
+          status: 'processed',
+          timestamp: serverTimestamp()
+        });
+        return;
+      }
 
       // Sync Finish State
       const statusRef = doc(db, 'artifacts', appId, 'public', 'data', 'room_state', 'game_status');
@@ -604,6 +667,14 @@ export default function App() {
     if (isGenerating || isLocked) {
       if (isLocked) addSystemLog(`GENERATION LOCKED BY ${generationLock.by || 'ANOTHER AGENT'}`);
       return;
+    }
+
+    // Admin Check for PLAYING phase
+    if (gamePhase === 'PLAYING') {
+      if (ADMIN_UID && user.uid !== ADMIN_UID) {
+        addSystemLog(`ACCESS DENIED: Only ADMIN can generate new puzzle during active game.`);
+        return;
+      }
     }
 
     setIsGenerating(true);
@@ -1001,9 +1072,9 @@ export default function App() {
               <h2 className={`text-xs ${THEME.textDim} uppercase tracking-[0.2em]`}>The Soup</h2>
               <button
                 onClick={openGenerateModal}
-                disabled={isGenerating || (generationLock?.isGenerating && (Date.now() - (generationLock.timestamp?.seconds * 1000 || 0) < 60000))}
+                disabled={isGenerating || (generationLock?.isGenerating && (Date.now() - (generationLock.timestamp?.seconds * 1000 || 0) < 60000)) || (gamePhase === 'PLAYING' && ADMIN_UID && user.uid !== ADMIN_UID)}
                 className={`text-xs px-3 py-1.5 border ${THEME.border} flex items-center gap-2 transition-all
-                  ${isGenerating || (generationLock?.isGenerating && (Date.now() - (generationLock.timestamp?.seconds * 1000 || 0) < 60000))
+                  ${isGenerating || (generationLock?.isGenerating && (Date.now() - (generationLock.timestamp?.seconds * 1000 || 0) < 60000)) || (gamePhase === 'PLAYING' && ADMIN_UID && user.uid !== ADMIN_UID)
                     ? 'opacity-50 cursor-not-allowed'
                     : 'hover:border-[var(--color-primary)] hover:text-[var(--color-primary)]'
                   }`}
@@ -1016,7 +1087,7 @@ export default function App() {
                 ) : (
                   <>
                     <Sparkles size={12} />
-                    生成新谜题
+                    {gamePhase === 'PLAYING' && ADMIN_UID && user.uid !== ADMIN_UID ? 'LOCKED (ADMIN ONLY)' : '生成新谜题'}
                   </>
                 )}
               </button>
@@ -1229,7 +1300,7 @@ export default function App() {
             </h2>
             <div className={`space-y-1 ${THEME.textDim}`}>
               {systemLogs.map((log, i) => (
-                <div key={i}>&gt; {log}</div>
+                <LogItem key={i} message={log} />
               ))}
               <div>&gt; SYSTEM READY</div>
             </div>
