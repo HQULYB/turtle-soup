@@ -45,6 +45,12 @@ import {
   Sparkles,
   Loader2,
   X,
+  HelpCircle,
+  Heart,          // <--- ➕ 新增：给学妹
+  GraduationCap,   // <--- ➕ 新增：给学长
+  Search,  // 新增：侦探
+  Ghost,   // 新增：古神
+  Coffee,   // 新增：管家
   MessageCircle, // For Mesugaki icon
   TerminalSquare // For Terminal icon
 } from 'lucide-react';
@@ -226,6 +232,7 @@ export default function App() {
   const [joined, setJoined] = useState(false);
 
   // Game State
+  
   const [messages, setMessages] = useState([]);
   const [inputMode, setInputMode] = useState('QUERY'); // QUERY | SOLVE
   const [inputText, setInputText] = useState('');
@@ -245,6 +252,8 @@ export default function App() {
 
   // Custom Theme Modal State
   const [showNewGameModal, setShowNewGameModal] = useState(false);
+  const [showHelpModal, setShowHelpModal] = useState(false); // <--- ➕ 新增这一行
+  // ...
   const [themeKeywords, setThemeKeywords] = useState('');
 
   // Access Control
@@ -256,7 +265,22 @@ export default function App() {
     const timer = setInterval(() => setNow(Date.now()), 5000);
     return () => clearInterval(timer);
   }, []);
-
+  // --- 新增：风格配置 ---
+  const PERSONA_OPTS = {
+      TERMINAL: { label: 'SYS',  icon: <TerminalSquare size={14} />, style: '' }, // 默认样式
+      MESUGAKI: { label: 'U-14', icon: <MessageCircle size={14} />,  style: 'border-pink-500 text-pink-500 bg-pink-500/10' },
+      JUNIOR:   { label: 'KOUHAI', icon: <Heart size={14} />,        style: 'border-sky-400 text-sky-400 bg-sky-500/10' },
+      SENIOR:   { label: 'SENPAI', icon: <GraduationCap size={14} />, style: 'border-indigo-400 text-indigo-400 bg-indigo-500/10' },
+      DETECTIVE:{ label: 'DET',  icon: <Search size={14} />,         style: 'border-amber-500 text-amber-500 bg-amber-500/10' },
+      ELDRITCH: { label: 'VOID', icon: <Ghost size={14} />,          style: 'border-purple-500 text-purple-500 bg-purple-500/10' },
+      BUTLER:   { label: 'SERV', icon: <Coffee size={14} />,         style: 'border-slate-400 text-slate-300 bg-slate-500/10' },
+    };
+  const PERSONA_KEYS = Object.keys(PERSONA_OPTS); // ['TERMINAL', 'MESUGAKI', ...]
+  const cyclePersona = () => {
+      const currentIndex = PERSONA_KEYS.indexOf(persona);
+      const nextIndex = (currentIndex + 1) % PERSONA_KEYS.length;
+      setPersona(PERSONA_KEYS[nextIndex]);
+    };
 
   const isGlobalLoading = useMemo(() => messages.some(m => m.status === 'analyzing'), [messages]);
   useEffect(() => {
@@ -361,22 +385,6 @@ export default function App() {
       }
     });
 
-    // 7. Sync System Logs
-    const logsQuery = query(
-      collection(db, 'artifacts', appId, 'public', 'data', 'system_logs'),
-      orderBy('timestamp', 'desc'),
-      limit(20)
-    );
-    const unsubLogs = onSnapshot(logsQuery, (snapshot) => {
-      const logs = snapshot.docs.map(doc => {
-        const data = doc.data();
-        // Format timestamp locally
-        const time = data.timestamp ? data.timestamp.toDate().toLocaleTimeString() : '...';
-        return `[${time}] ${data.message}`;
-      });
-      setSystemLogs(logs);
-    }, (err) => console.error("Logs sync error", err));
-
     return () => {
       unsubMsg();
       unsubClues();
@@ -384,7 +392,6 @@ export default function App() {
       unsubPuzzle();
       unsubStatus();
       unsubLock();
-      unsubLogs();
     };
   }, [user, joined]);
 
@@ -628,17 +635,8 @@ export default function App() {
     }
   };
 
-  const addSystemLog = async (msg) => {
-    // Fire and forget
-    try {
-      // Keep it simple, just add to collection
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'system_logs'), {
-        message: msg,
-        timestamp: serverTimestamp()
-      });
-    } catch (err) {
-      console.error("Failed to add system log", err);
-    }
+  const addSystemLog = (msg) => {
+    setSystemLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev].slice(0, 10));
   };
 
   // 开始新游戏
@@ -649,12 +647,9 @@ export default function App() {
       const messagesSnapshot = await getDocs(messagesRef);
       await Promise.all(messagesSnapshot.docs.map(doc => deleteDoc(doc.ref)));
 
+      const cluesRef = collection(db, 'artifacts', appId, 'public', 'data', 'game_clues');
       const cluesSnapshot = await getDocs(cluesRef);
       await Promise.all(cluesSnapshot.docs.map(doc => deleteDoc(doc.ref)));
-
-      const logsRef = collection(db, 'artifacts', appId, 'public', 'data', 'system_logs');
-      const logsSnapshot = await getDocs(logsRef);
-      await Promise.all(logsSnapshot.docs.map(doc => deleteDoc(doc.ref)));
 
       // 重置所有玩家分数
       // 重置所有玩家分数
@@ -861,7 +856,97 @@ export default function App() {
       </div>
     )
   );
+// --- ➕ 新增：使用说明弹窗 ---
+  const renderHelpModal = () => (
+    showHelpModal && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-4 backdrop-blur-sm animate-fadeIn">
+        <div className={`w-full max-w-lg border ${THEME.border} ${THEME.bg} p-6 relative shadow-2xl flex flex-col max-h-[80vh]`}>
+          
+          {/* 关闭按钮 */}
+          <button
+            onClick={() => setShowHelpModal(false)}
+            className="absolute top-4 right-4 text-[#666] hover:text-[#fff] transition-colors"
+          >
+            <X size={20} />
+          </button>
 
+          <h2 className="text-xl font-bold mb-6 flex items-center gap-2 text-[var(--color-primary)] tracking-wider">
+            <HelpCircle size={20} /> OPERATIONAL_MANUAL
+          </h2>
+
+          <div className="overflow-y-auto pr-2 space-y-6 text-sm font-mono text-[var(--color-text)]">
+            
+            {/* 1. 核心目标 */}
+            <section>
+              <h3 className={`text-xs font-bold ${THEME.secondary} mb-2 uppercase border-b ${THEME.border} pb-1`}>
+                01 // OBJECTIVE
+              </h3>
+              <p className="opacity-80">
+                还原 <span className="text-[var(--color-primary)]">CASE (海龟汤)</span> 的真相。
+                阅读谜面，通过向 AI 提问来获取信息，直到完全拼凑出故事全貌。
+              </p>
+            </section>
+
+            {/* 2. 操作模式 */}
+            <section>
+              <h3 className={`text-xs font-bold ${THEME.secondary} mb-2 uppercase border-b ${THEME.border} pb-1`}>
+                02 // INTERFACE MODES
+              </h3>
+              <ul className="space-y-3 opacity-80">
+                <li className="flex gap-2">
+                  <span className="bg-[var(--color-primary)]/20 text-[var(--color-primary)] px-1 rounded text-[10px] h-fit mt-0.5">QUERY</span>
+                  <span>
+                    <strong>提问模式：</strong> 输入只能用“是/否”回答的问题。<br/>
+                    <span className="text-[10px] opacity-60">例如：“那个男人认识死者吗？”</span>
+                  </span>
+                </li>
+                <li className="flex gap-2">
+                  <span className="bg-[var(--color-error)]/20 text-[var(--color-error)] px-1 rounded text-[10px] h-fit mt-0.5">SOLVE</span>
+                  <span>
+                    <strong>破案模式：</strong> 当你认为已经得知真相时，在此模式下输入完整的故事复盘。如果核心逻辑正确，游戏胜利。
+                  </span>
+                </li>
+              </ul>
+            </section>
+
+            {/* 3. 资源管理 */}
+            <section>
+              <h3 className={`text-xs font-bold ${THEME.secondary} mb-2 uppercase border-b ${THEME.border} pb-1`}>
+                03 // RESOURCES & SANITY
+              </h3>
+              <div className="flex items-start gap-2 opacity-80">
+                <Activity size={16} className="mt-1 text-[var(--color-warn)]"/>
+                <p>
+                  每次 <strong>QUERY</strong> 会消耗 <span className="text-[var(--color-warn)]">SANITY (理智值)</span>。
+                  当理智耗尽时将无法提问。成功还原真相或获得关键线索可恢复理智。
+                </p>
+              </div>
+            </section>
+
+            {/* 4. 个性化 */}
+            <section>
+              <h3 className={`text-xs font-bold ${THEME.secondary} mb-2 uppercase border-b ${THEME.border} pb-1`}>
+                04 // SYSTEM PERSONA
+              </h3>
+              <p className="opacity-80">
+                点击输入框上方的 <span className="border border-[var(--color-border)] px-1 text-[10px]">SYS</span> 按钮可以切换 AI 的人格风格（如：毒舌、克苏鲁、侦探等）。
+              </p>
+            </section>
+
+          </div>
+
+          <div className="mt-6 pt-4 border-t border-[var(--color-border)] text-center">
+            <button
+              onClick={() => setShowHelpModal(false)}
+              className={`w-full py-2 bg-[var(--color-primary)]/10 hover:bg-[var(--color-primary)]/20 text-[var(--color-primary)] border border-[var(--color-primary)]/50 transition-all font-bold text-xs`}
+            >
+              ACKNOWLEDGE
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  );
   // --- Access Control ---
   if (!isAuthorized) {
     return (
@@ -1066,13 +1151,25 @@ export default function App() {
           >
             {theme === 'night' ? <Sun size={14} className={THEME.primary} /> : <Moon size={14} className={THEME.primary} />}
           </button>
+          {/* 循环切换风格按钮 */}
           <button
-            onClick={() => setPersona(persona === 'TERMINAL' ? 'MESUGAKI' : 'TERMINAL')}
-            className={`p-1 rounded ${THEME.border} border hover:opacity-80 transition-opacity flex items-center gap-1 px-2 ${persona === 'MESUGAKI' ? 'bg-pink-500/10 border-pink-500 text-pink-500' : ''}`}
-            title={persona === 'TERMINAL' ? "Switch to Personality Mode" : "Switch to Terminal Mode"}
+            onClick={cyclePersona}
+            className={`p-1 rounded border transition-all flex items-center gap-1 px-2 ${
+              PERSONA_OPTS[persona]?.style || `${THEME.border} hover:opacity-80`
+            }`}
+            title={`Current Mode: ${persona}`}
           >
-            {persona === 'TERMINAL' ? <TerminalSquare size={14} /> : <MessageCircle size={14} />}
-            <span className="text-[10px] font-bold hidden md:inline">{persona === 'TERMINAL' ? 'SYS' : 'U-14'}</span>
+            {PERSONA_OPTS[persona]?.icon}
+            <span className="text-[10px] font-bold hidden md:inline">
+              {PERSONA_OPTS[persona]?.label}
+            </span>
+          </button>
+          <button
+            onClick={() => setShowHelpModal(true)}
+            className={`p-2 rounded border ${THEME.border} hover:bg-[var(--color-bg-panel)] transition-colors text-[var(--color-text-dim)] hover:text-[var(--color-primary)]`}
+            title="Mission Briefing"
+          >
+            <HelpCircle size={16} />
           </button>
           <div className="flex gap-2 items-center" title={`World Completeness: ${worldCompleteness}%`}>
             <span className={`text-[10px] uppercase font-bold ${THEME.textDim}`}>TRUTH</span>
@@ -1353,7 +1450,7 @@ export default function App() {
       {/* New Game Modal */}
       {/* New Game Modal */}
       {renderNewGameModal()}
-
+      {renderHelpModal()} {/* <--- ➕ 加在这里 */}
       {/* Global CSS for animations */}
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
