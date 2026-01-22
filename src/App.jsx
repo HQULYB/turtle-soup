@@ -361,6 +361,22 @@ export default function App() {
       }
     });
 
+    // 7. Sync System Logs
+    const logsQuery = query(
+      collection(db, 'artifacts', appId, 'public', 'data', 'system_logs'),
+      orderBy('timestamp', 'desc'),
+      limit(20)
+    );
+    const unsubLogs = onSnapshot(logsQuery, (snapshot) => {
+      const logs = snapshot.docs.map(doc => {
+        const data = doc.data();
+        // Format timestamp locally
+        const time = data.timestamp ? data.timestamp.toDate().toLocaleTimeString() : '...';
+        return `[${time}] ${data.message}`;
+      });
+      setSystemLogs(logs);
+    }, (err) => console.error("Logs sync error", err));
+
     return () => {
       unsubMsg();
       unsubClues();
@@ -368,6 +384,7 @@ export default function App() {
       unsubPuzzle();
       unsubStatus();
       unsubLock();
+      unsubLogs();
     };
   }, [user, joined]);
 
@@ -611,8 +628,17 @@ export default function App() {
     }
   };
 
-  const addSystemLog = (msg) => {
-    setSystemLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev].slice(0, 10));
+  const addSystemLog = async (msg) => {
+    // Fire and forget
+    try {
+      // Keep it simple, just add to collection
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'system_logs'), {
+        message: msg,
+        timestamp: serverTimestamp()
+      });
+    } catch (err) {
+      console.error("Failed to add system log", err);
+    }
   };
 
   // 开始新游戏
@@ -623,9 +649,12 @@ export default function App() {
       const messagesSnapshot = await getDocs(messagesRef);
       await Promise.all(messagesSnapshot.docs.map(doc => deleteDoc(doc.ref)));
 
-      const cluesRef = collection(db, 'artifacts', appId, 'public', 'data', 'game_clues');
       const cluesSnapshot = await getDocs(cluesRef);
       await Promise.all(cluesSnapshot.docs.map(doc => deleteDoc(doc.ref)));
+
+      const logsRef = collection(db, 'artifacts', appId, 'public', 'data', 'system_logs');
+      const logsSnapshot = await getDocs(logsRef);
+      await Promise.all(logsSnapshot.docs.map(doc => deleteDoc(doc.ref)));
 
       // 重置所有玩家分数
       // 重置所有玩家分数
