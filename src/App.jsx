@@ -322,7 +322,7 @@ export default function App() {
     const msgQuery = query(
       collection(db, 'artifacts', appId, 'public', 'data', 'chat_messages'),
       orderBy('timestamp', 'asc'),
-      limit(50)
+      limit(30)
     );
 
     const unsubMsg = onSnapshot(msgQuery, (snapshot) => {
@@ -465,7 +465,7 @@ export default function App() {
       score: 0,
       uid: user.uid,
       status: 'ONLINE',
-      queryCount: 10,
+      sanity: 50,
       lastQueryTime: null,
       lastSeen: serverTimestamp(),
       joinedAt: serverTimestamp()
@@ -478,48 +478,76 @@ export default function App() {
     e.preventDefault();
     if (!inputText.trim()) return;
 
-    // --- Command: /skip ---
+// --- Command: /skip ---
     if (inputText.trim().toLowerCase() === '/skip') {
-      setInputText('');
+      setInputText(''); // 清空输入框
 
+      // 1. 🔒 权限验证
+      // 如果 .env 设置了 ADMIN_UID，且当前用户不是那个 UID，则拦截
       if (ADMIN_UID && user.uid !== ADMIN_UID) {
         addSystemLog(`ACCESS DENIED: /skip requires ADMIN privileges.`);
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'chat_messages'), {
-          text: `> COMMAND REJECTED: UNAUTHORIZED USER [${username}]`,
+          text: `> ⛔ COMMAND REJECTED: UNAUTHORIZED USER [${username}]`, // 加了个图标更直观
           sender: "SYSTEM",
           senderId: "SYSTEM",
-          type: "error",
+          type: "error", // 拒绝访问用红色是对的
           status: 'processed',
           timestamp: serverTimestamp()
         });
         return;
       }
 
-      // Sync Finish State
-      const statusRef = doc(db, 'artifacts', appId, 'public', 'data', 'room_state', 'game_status');
-      await setDoc(statusRef, {
-        status: 'FINISHED',
-        winner: `${username} (SKIPPED)`,
-        lastUpdate: serverTimestamp()
-      }, { merge: true });
-
-      // Local update for immediate feedback (though sync will catch it)
+      // 2. ⚡ 本地UI立即反馈 (让管理员不用等网络延迟马上看到结果)
       setSolvedBy(`${username} (SKIPPED)`);
       setGamePhase('FINISHED');
       addSystemLog(`${username} EXECUTED /skip. TRUTH REVEALED.`);
 
-      // Override Message
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'chat_messages'), {
-        text: ">> [OVERRIDE] FORCE SKIP DETECTED. REVEALING TRUTH...",
-        sender: "SYSTEM",
-        senderId: "SYSTEM",
-        type: "error",
-        status: 'processed',
-        timestamp: serverTimestamp()
-      });
+      // 3. 📡 数据库同步 (这是核心)
+      try {
+        // 更新房间状态
+        const statusRef = doc(db, 'artifacts', appId, 'public', 'data', 'room_state', 'game_status');
+        await setDoc(statusRef, {
+          status: 'FINISHED',
+          winner: `${username} (SKIPPED)`,
+          lastUpdate: serverTimestamp()
+        }, { merge: true });
+
+        // 4. 📢 发送公屏广播
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'chat_messages'), {
+          text: ">> [ADMIN] 🕵️‍♂️ 强制跳过！真相正在揭晓 (FORCE REVEAL)...", // 文案稍微帅气一点
+          sender: "SYSTEM",
+          senderId: "SYSTEM",
+          type: "success", // 🟢 关键修改：改成 success 让它显示绿色，而不是红色的 error
+          status: 'processed',
+          timestamp: serverTimestamp()
+        });
+      } catch (err) {
+        console.error("Skip command failed:", err);
+        addSystemLog("ERROR: Failed to update database.");
+      }
+      
       return;
     }
+    // --- 新增功能：输入 /heal 就能回满血 ---
+    if (inputText.trim().toLowerCase() === '/heal') {
+      setInputText(''); // 清空输入框
 
+      try {
+        // 找到当前玩家，把 sanity 改成 100
+        const playerRef = doc(db, 'artifacts', appId, 'public', 'data', 'players', user.uid);
+        await updateDoc(playerRef, { 
+          sanity: 100,
+          status: 'ONLINE' 
+        });
+        
+        // 在屏幕上提示一下
+        addSystemLog("SYSTEM: SANITY FULLY RESTORED. (作弊码生效)");
+        
+      } catch (err) {
+        console.error("回血失败:", err);
+      }
+      return; // 这一行很重要！阻止这句话发给 AI
+    }
     // --- Sanity & Cooldown Check ---
     const currentPlayer = players.find(p => p.uid === user.uid);
     const now = Date.now();
@@ -532,8 +560,9 @@ export default function App() {
     }
 
     // Check Sanity
-    if (inputMode === 'QUERY' && (currentPlayer?.queryCount ?? 10) <= 0) {
-      addSystemLog('SANITY DEPLETED. CANNOT QUERY.');
+    // 如果 sanity (理智) 小于等于 0，就禁止提问
+    if (inputMode === 'QUERY' && (currentPlayer?.sanity ?? 0) <= 0) {
+      addSystemLog('SANITY DEPLETED. YOUR MIND IS BROKEN. (理智耗尽)');
       return;
     }
 
@@ -590,7 +619,8 @@ export default function App() {
 
       // 只有 QUERY 模式且成功时扣除 Sanity 并重置 CD
       if (mode === 'QUERY') {
-        updates.queryCount = increment(-1);
+        // updates.queryCount = increment(-1); // 删除这一行
+        updates.sanity = increment(-1);        // <--- ✨ 新增：每次提问扣 1 点理智
         updates.lastQueryTime = serverTimestamp();
       }
 
@@ -652,13 +682,12 @@ export default function App() {
       await Promise.all(cluesSnapshot.docs.map(doc => deleteDoc(doc.ref)));
 
       // 重置所有玩家分数
-      // 重置所有玩家分数
       const playersRef = collection(db, 'artifacts', appId, 'public', 'data', 'players');
       const playersSnapshot = await getDocs(playersRef);
       await Promise.all(playersSnapshot.docs.map(doc =>
         updateDoc(doc.ref, {
           score: 0,
-          queryCount: 10,
+          sanity: 50,
           lastQueryTime: null
         })
       ));
@@ -732,7 +761,7 @@ export default function App() {
       await Promise.all(playersSnapshot.docs.map(doc =>
         updateDoc(doc.ref, {
           score: 0,
-          queryCount: 10,
+          sanity: 50,
           lastQueryTime: null
         })
       ));
@@ -1419,9 +1448,16 @@ export default function App() {
                         </div>
                         <div>
                           <div className={`text-xs font-bold ${p.uid === user.uid ? 'text-[var(--color-primary)]' : ''}`}>{p.name}</div>
-                          <div className={`text-[10px] ${THEME.textDim} flex items-center gap-2`}>
-                            <span>SANITY: {p.queryCount ?? 10}/10</span>
-                          </div>
+                        <div className={`text-[10px] ${THEME.textDim} flex items-center gap-2`}>
+                          <span className="opacity-70">SAN:</span>
+                          <span className={
+                            (p.sanity ?? 100) < 40 
+                              ? "text-red-500 font-bold animate-pulse" // 低理智：红色闪烁
+                              : "text-[var(--color-primary)]"           // 高理智：主题色
+                          }>
+                            {p.sanity ?? 100}%
+                          </span>
+                        </div>
                         </div>
                       </div>
                       <div className="text-lg font-bold">{p.score || 0}</div>
